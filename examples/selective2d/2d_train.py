@@ -200,8 +200,10 @@ def pp_and_tp_fg(model, mesh, args, tp_attn_layers=None, tp_mlp_layers=None, cut
   tp_mlp_layers = list(range(args.n_layer)) if tp_mlp_layers is None else tp_mlp_layers
   for i in range(args.n_layer):
     name = f'transformer.h.{i}'
-    att = tp_attention(model, f'{name}.attn', mesh, tp_dim)
-    mlp = tp_mlp(model, f'{name}', mesh, tp_dim)
+    if i in tp_attn_layers:
+      att = tp_attention(model, f'{name}.attn', mesh, tp_dim)
+    if i in tp_mlp_layers:
+      mlp = tp_mlp(model, f'{name}', mesh, tp_dim)
 
   X, Y = get_rand(args)
 

@@ -326,6 +326,25 @@ if __name__ == '__main__':
 
   model_args['vocab_size'] = args.vocab_size
 
+  # Parallel Plan
+  # example: for Attn, apply TP to even layers
+  tp_attn_layers = list(range(0,12,2))
+  tp_mlp_layers = list(range(0,12,2))
+
+  meshes = []
+  for i in range(0, args.n_layer):
+    if i in tp_attn_layers or i in tp_attn_layers:
+      # 2d tp+pp
+      meshes.append( DeviceMesh(
+          device_type=device_type,
+          mesh=torch.arange(0, args.world_size).view(-1, args.tp_size),
+        )
+    else:
+      # 1d pp 
+      meshes.append(
+          device_type=device_type,
+          mesh=torch.arange(0, args.size).view(
+        )
   gptconf = GPTConfig(**model_args)
   model = GPT(twod_mesh, gptconf, args.device, args.pp_size)
   model.to(args.device)

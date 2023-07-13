@@ -21,6 +21,10 @@ from torch.distributed.tensor.parallel import (
     parallelize_module,
 )
 
+from pippy.IR import annotate_split_points, PipeSplitWrapper 
+from pippy.compile import compile_stage
+from pippy.microbatch import TensorChunkSpec, sum_reducer
+
 def get_args():
   # default config values designed to train a gpt2 (124M) on OpenWebText
 
@@ -130,11 +134,6 @@ def tp(model, n_layer, mesh, offset=0, tp_dim=0):
   return model
 
 def pp(model, pp_device_mesh, args):
-  from pippy.IR import annotate_split_points, PipeSplitWrapper 
-  from pippy import split_into_equal_size
-  from pippy.compile import compile_stage
-  from pippy.microbatch import TensorChunkSpec, sum_reducer
-
   pp_chunks = args.world_size 
   pp_groups = pp_device_mesh.get_dim_groups()[0]
 
@@ -146,10 +145,7 @@ def pp(model, pp_device_mesh, args):
   print(f'[Rank{_rank}] {stage.submod.print_readable()}')
   return model, stage 
 
-def pp_and_tp(model, mesh, args):
-  from pippy.compile import compile_stage
-  from pippy.microbatch import TensorChunkSpec, sum_reducer
-
+def pp_and_tp_all(model, mesh, args):
   pp_dim, tp_dim = 0, 1
   pp_rank, tp_rank = args.rank // args.tp_size, args.rank % args.tp_size
   pp_groups = mesh.get_dim_groups()[pp_dim]
@@ -167,7 +163,9 @@ def pp_and_tp(model, mesh, args):
   return model, stage
 
 def even_cut(model, args, pp_size, cut={}):
-  from pippy.IR import annotate_split_points, PipeSplitWrapper 
+  """
+  Evenly cut a model into pp_size stages
+  """
   cutpoint = args.n_layer // pp_size
   for i in range(args.n_layer):
     name = f'transformer.h.{i}'
@@ -177,7 +175,9 @@ def even_cut(model, args, pp_size, cut={}):
   annotate_split_points(model, cut)
 
 def after_ar_cut(model, args, pp_size, cut={}):
-  from pippy.IR import annotate_split_points, PipeSplitWrapper 
+  """
+  Cut a model right after AllReduce happens
+  """
   cutpoint = args.n_layer // pp_size
   for i in range(args.n_layer):
     name = f'transformer.h.{i}'
@@ -186,9 +186,10 @@ def after_ar_cut(model, args, pp_size, cut={}):
 
   annotate_split_points(model, cut)
 
-def pp_and_tp_fg(model, mesh, args, tp_attn_layers=None, tp_mlp_layers=None, cut_fn=even_cut):
-  from pippy.compile import compile_stage
-  from pippy.microbatch import TensorChunkSpec, sum_reducer
+def pp_and_tp(model, mesh, args, tp_attn_layers=None, tp_mlp_layers=None, cut_fn=even_cut):
+  """
+  Apply pipeline parallelism and tensor parallelism to a model. 
+  """
 
   pp_dim, tp_dim = 0, 1
   pp_rank, tp_rank = args.rank // args.tp_size, args.rank % args.tp_size
@@ -354,7 +355,7 @@ if __name__ == '__main__':
   #model = tp(model, args.n_layer, oned_mesh)
   #model, stage = pp(model, oned_mesh, args)
   #model, stage = pp_and_tp(model, twod_mesh, args)
-  model, stage = pp_and_tp_fg(model, twod_mesh, args)
+  model, stage = pp_and_tp(model, twod_mesh, args)
 
   #iter_count, iter_time = pp_train(stage, args)
   iter_count, iter_time = pp_tp_train(stage, twod_mesh, args)

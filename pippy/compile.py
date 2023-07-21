@@ -286,6 +286,13 @@ def compile_stage(
     sp = PiPPyShapeProp(gm)
     sp.propagate(*chunk0)
 
+    if rank == 0 and False:
+      print(f'BBBBBBBB')
+      for node in gm.graph.nodes:
+        print(node.name, node.meta, node)
+        #print(node.name, node.meta['tensor_meta'])
+      
+
     # Prepare output chunk/reduce spec for merging/reducing final outputs
     output_chunk_spec = (
         output_chunk_spec

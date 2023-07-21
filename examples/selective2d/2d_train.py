@@ -27,6 +27,8 @@ from torch.distributed.tensor.parallel import (
 
 from torch.profiler import profile, ProfilerActivity, record_function
 
+import pippy
+from pippy.fx.passes.shape_prop import ShapeProp
 
 def get_args():
     # default config values designed to train a gpt2 (124M) on OpenWebText
@@ -127,6 +129,7 @@ def get_args():
     )
     parser.add_argument("--tp_size", type=int, default=2)
     parser.add_argument("--pp_size", type=int, default=2)
+    parser.add_argument("--n_chunks", type=int, default=2)
 
     parser.add_argument("--debug", dest="debug", action="store_true")
 
@@ -310,7 +313,7 @@ def pp_and_tp_selective(
         model,
         pp_rank,
         args.world_size,
-        args.pp_size,
+        args.n_chunks,
         args.device,
         pp_groups,
         example_inputs=[X, Y],
@@ -407,6 +410,45 @@ def tp_train():
 
     return local_iter_num, iter_time
 
+def print_model_size(args, model, stage):
+    # let's just redo the shape prop here
+
+    #if args.rank == 0:
+    #  submod = stage.submod
+    #  print(submod)
+    #  for name, module in submod.named_modules():
+    #    print(name, type(module), module)
+
+    print(stage.submod)
+    if args.rank == 0 or args.rank == 1:
+      #return
+      x, y = get_rand(args)
+      #print(type(stage.submod))
+      gm = pippy.fx.symbolic_trace(stage.submod)
+      ShapeProp(gm).propagate(x)
+
+      for node in gm.graph.nodes:
+        if (node.meta['type'] == torch.distributed._functional_collectives.AsyncCollectiveTensor or
+          node.meta['type'] == torch.distributed._tensor.api.DTensor):
+          print(node.name, node.meta)
+
+    else:
+      # not working but not sure what's the problem
+      return
+      x, y = get_rand(args)
+      #x = torch.randint(0, 50304, ([16, 1024, 768]))
+      gm = pippy.fx.symbolic_trace(stage.submod)
+      #ShapeProp(gm).propagate(x)
+      ShapeProp(gm).propagate({'target':y})
+
+      for node in gm.graph.nodes:
+        print(node.name, node.meta)
+
+
+
+    #torch.distributed.barrier()
+    return
+
 
 if __name__ == "__main__":
     _multi_gpu = int(os.environ.get("RANK", -1)) != -1  # verify distributed run
@@ -470,20 +512,22 @@ if __name__ == "__main__":
     # model, stage = pp_and_tp(model, twod_mesh, args)
     model, stage = pp_and_tp_selective(model, twod_mesh, args, cut_fn=after_ar_cut)
 
+    print_model_size(args, model, stage)
+
     # iter_count, iter_time = pp_train(stage, args)
-    iter_count, iter_time = pp_tp_train(stage, twod_mesh, args)
+    #iter_count, iter_time = pp_tp_train(stage, twod_mesh, args)
 
-    # display run stats
-    rank_print(f"\nTraining completed.\n")
+    ## display run stats
+    #rank_print(f"\nTraining completed.\n")
 
-    gpu_type = torch.cuda.get_device_name(0)
-    gpu_count = dist.get_world_size()
-    rank_print(f"\n----- Performance Stats --------\n")
-    rank_print(f"\nModel Size:  {_current_model_params:.2f}M")
-    rank_print(f"Run completed with {gpu_count} gpus, of type {gpu_type}")
-    iter_avg = round(iter_time / iter_count, 4)
-    rank_print(
-        f"Avg iter speed (in seconds): {iter_avg}, with {iter_count} iterations averaged.\n"
-    )
+    #gpu_type = torch.cuda.get_device_name(0)
+    #gpu_count = dist.get_world_size()
+    #rank_print(f"\n----- Performance Stats --------\n")
+    #rank_print(f"\nModel Size:  {_current_model_params:.2f}M")
+    #rank_print(f"Run completed with {gpu_count} gpus, of type {gpu_type}")
+    #iter_avg = round(iter_time / iter_count, 4)
+    #rank_print(
+    #    f"Avg iter speed (in seconds): {iter_avg}, with {iter_count} iterations averaged.\n"
+    #)
 
     dist.destroy_process_group()
